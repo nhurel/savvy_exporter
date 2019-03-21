@@ -1,0 +1,12 @@
+[Unit]
+Description=Prometheus savvy exporter
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/prometheus
+ExecStart=/opt/prometheus/savvy_exporter/savvy_exporter --log error
+User=savvy
+
+[Install]
+WantedBy=multi-user.target
