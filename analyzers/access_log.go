@@ -49,7 +49,7 @@ func ExportAccessLogs(ctx context.Context, logDir string) error {
 	wg := sync.WaitGroup{}
 
 	for _, fi := range fis {
-		if !fi.IsDir() {
+		if fi.IsDir() {
 			continue
 		}
 		if strings.HasPrefix(fi.Name(), "error") || strings.HasPrefix(fi.Name(), "ssl_error") || !strings.HasSuffix(fi.Name(), ".log") {
@@ -87,6 +87,7 @@ func ExportAccessLogs(ctx context.Context, logDir string) error {
 
 func analyseLogFile(ctx context.Context, fileName string, logs chan<- *AccessLogInfo) error {
 	log := logrus.WithField("logfile", filepath.Base(fileName))
+	log.Debugln("Analyzing new access log file")
 	t, err := tail.TailFile(fileName, tail.Config{
 		Follow:   true,
 		ReOpen:   true,
@@ -96,6 +97,7 @@ func analyseLogFile(ctx context.Context, fileName string, logs chan<- *AccessLog
 		return errors.Wrap(err, "Failed to open log file")
 	}
 	vhost := parseVhostFromFilename(filepath.Base(fileName))
+	log = log.WithField("vhost", vhost)
 
 	for {
 		select {
@@ -105,6 +107,7 @@ func analyseLogFile(ctx context.Context, fileName string, logs chan<- *AccessLog
 			if line == nil || line.Err != nil {
 				continue
 			}
+			log.WithField("line", line).Debugln("Parsing new access log line")
 			info, err := parseAccessLogLine(line.Text)
 			if err != nil {
 				log.WithError(err).Debugln("Ignoring line")
