@@ -87,7 +87,7 @@ func ExportProcesses(ctx context.Context, freq time.Duration) {
 		for {
 			select {
 			case <-ctx.Done():
-				break
+				return
 			case <-time.Tick(freq):
 				processes, err := scanProcesses("/proc")
 				if err != nil {
