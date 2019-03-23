@@ -17,8 +17,10 @@ func main() {
 
 	var enableProcess = flag.Bool("process-enable", true, "Enable processes metrics")
 	var enableAuth = flag.Bool("auth-enable", true, "Enable auth logs metrics")
+	var enableAccessLog = flag.Bool("access-log-enable", true, "Enable access logs metrics")
 	var processScanInterval = flag.Duration("process-frequency", 5*time.Second, "Processes scan interval")
 	var authIgnoreCron = flag.Bool("auth-ignore-cron", false, "Skip cron metrics")
+	var accessLogDir = flag.String("acces-log-dir", "/var/log/apache2", "Log dir where access logs are stored")
 	var logLevel = flag.String("log", "info", "log level : debug, info, warn, error")
 	flag.Parse()
 	switch *logLevel {
@@ -41,6 +43,12 @@ func main() {
 	}
 	if *enableAuth {
 		analyzers.ExportAuth(ctx, *authIgnoreCron)
+	}
+
+	if *enableAccessLog {
+		if err := analyzers.ExportAccessLogs(ctx, *accessLogDir); err != nil {
+			log.Fatalln(err)
+		}
 	}
 
 	http.Handle("/metrics", promhttp.Handler())
