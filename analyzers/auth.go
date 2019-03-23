@@ -24,7 +24,7 @@ type AuthInfo struct {
 }
 
 // ExportAuth exposes promethus metric about login attempts
-func ExportAuth(ctx context.Context, ignoreCron bool) {
+func ExportAuth(ctx context.Context, ignoreCron bool) error {
 
 	t, err := tail.TailFile("/var/log/auth.log", tail.Config{
 		Location: &tail.SeekInfo{Offset: 0, Whence: os.SEEK_END},
@@ -32,7 +32,7 @@ func ExportAuth(ctx context.Context, ignoreCron bool) {
 		ReOpen:   true,
 		Logger:   tail.DiscardingLogger})
 	if err != nil {
-		logrus.WithError(err).Fatalln("Fail to tail /var/log/auth.log")
+		return errors.Wrap(err, "Fail to tail /var/log/auth.log")
 	}
 
 	var metricLabels = []string{"type", "success", "username"}
@@ -63,6 +63,7 @@ func ExportAuth(ctx context.Context, ignoreCron bool) {
 			}
 		}
 	}()
+	return nil
 }
 
 // Mar 21 23:04:01 servername CRON[32490]: pam_unix(cron:session): session opened for user nobody by (uid=65534)
