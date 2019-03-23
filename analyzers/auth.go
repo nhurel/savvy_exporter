@@ -59,7 +59,7 @@ func ExportAuth(ctx context.Context, ignoreCron bool) {
 					}
 				}
 			case <-ctx.Done():
-				break
+				return
 			}
 		}
 	}()
