@@ -15,7 +15,10 @@ import (
 
 func main() {
 
+	var enableProcess = flag.Bool("process-enable", true, "Enable processes metrics")
+	var enableAuth = flag.Bool("auth-enable", true, "Enable auth logs metrics")
 	var processScanInterval = flag.Duration("process-frequency", 5*time.Second, "Processes scan interval")
+	var authIgnoreCron = flag.Bool("auth-ignore-cron", false, "Skip cron metrics")
 	var logLevel = flag.String("log", "info", "log level : debug, info, warn, error")
 	flag.Parse()
 	switch *logLevel {
@@ -31,7 +34,14 @@ func main() {
 		log.Fatalf("Unknown log level %s", *logLevel)
 	}
 
-	analyzers.ExportProcesses(context.Background(), *processScanInterval)
+	ctx := context.Background()
+
+	if *enableProcess {
+		analyzers.ExportProcesses(ctx, *processScanInterval)
+	}
+	if *enableAuth {
+		analyzers.ExportAuth(ctx, *authIgnoreCron)
+	}
 
 	http.Handle("/metrics", promhttp.Handler())
 	log.Fatal(http.ListenAndServe(":19098", nil))
@@ -39,5 +49,4 @@ func main() {
 	// TODO version
 	//TODO : apache metrics
 	//TODO : fail2ban metrics
-	//TODO : /var/log/auth metrics
 }

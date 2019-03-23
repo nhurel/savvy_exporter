@@ -225,15 +225,6 @@ func analyzeProcess(processPath string, process os.FileInfo, out chan<- *Process
 	}
 }
 
-func setGaugeValue(gaugeVector *prometheus.GaugeVec, labels []string, value int) error {
-	observer, err := gaugeVector.GetMetricWithLabelValues(labels...)
-	if err != nil {
-		return err
-	}
-	observer.Set(float64(value))
-	return nil
-}
-
 func parseStatContent(stat string) (cmd string, state string, utime int, stime int, err error) {
 	statParts := strings.Split(stat, " ")
 	if len(statParts) < 15 {
