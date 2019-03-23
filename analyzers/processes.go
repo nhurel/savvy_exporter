@@ -36,7 +36,7 @@ var totalMemory int
 func ExportProcesses(ctx context.Context, freq time.Duration) {
 	logrus.Debugf("Exporting processes metrics every %s", freq)
 	var err error
-	totalMemory, err = parseMeminfo()
+	totalMemory, err = parseMeminfo("/proc/meminfo")
 	if err != nil {
 		logrus.WithError(err).Fatalln("Could not read memory info")
 	}
@@ -280,14 +280,15 @@ func parseStatContent(stat string) (cmd string, state string, utime int, stime i
 	return
 }
 
+// Meminfo in statm are in number of pages. Needs to multiply by page size to get value in bytes
+var pageSize = os.Getpagesize()
+
 func parseStatmContent(statm string) (vmsize, resident, shared int, err error) {
 	statmParts := strings.Split(statm, " ")
 	if len(statmParts) != 7 {
 		err = fmt.Errorf("statm doesn't contain 7 fields, only %d", len(statmParts))
 		return
 	}
-	// Meminfo in statm are in number of pages. Needs to multiply by page size to get value in bytes
-	pageSize := os.Getpagesize()
 	var convErr error
 	vmsize, convErr = strconv.Atoi(statmParts[0])
 	if convErr != nil {
@@ -309,8 +310,8 @@ func parseStatmContent(statm string) (vmsize, resident, shared int, err error) {
 
 var MeminfoRE = regexp.MustCompile("MemTotal:\\s+(\\d+)\\s*([a-zA-Z]+)")
 
-func parseMeminfo() (int, error) {
-	file, err := os.Open("/proc/meminfo")
+func parseMeminfo(meminfoPath string) (int, error) {
+	file, err := os.Open(meminfoPath)
 	defer file.Close()
 	if err != nil {
 		return 0, err
