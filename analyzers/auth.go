@@ -54,7 +54,9 @@ func ExportAuth(ctx context.Context, ignoreCron bool) {
 				logrus.WithField("line", line).Debugln("Parsing new auth log")
 				authLine, err := parseAuthLine(line.Text, ignoreCron)
 				if err == nil {
-					incrementCounterValue(authCounter, []string{authLine.authType, strconv.FormatBool(authLine.success), authLine.username}, 1)
+					if err := incrementCounterValue(authCounter, []string{authLine.authType, strconv.FormatBool(authLine.success), authLine.username}, 1); err != nil {
+						logrus.WithField("authLine", authLine).WithError(err).Errorln("Failed to count line")
+					}
 				}
 			case <-ctx.Done():
 				break
