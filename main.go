@@ -59,6 +59,5 @@ func main() {
 	log.Fatal(http.ListenAndServe(":19098", nil))
 
 	// TODO version
-	//TODO : apache metrics
 	//TODO : fail2ban metrics
 }
