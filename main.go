@@ -39,7 +39,9 @@ func main() {
 	ctx := context.Background()
 
 	if *enableProcess {
-		analyzers.ExportProcesses(ctx, *processScanInterval)
+		if err := analyzers.ExportProcesses(ctx, *processScanInterval); err != nil {
+			log.Fatalln(err)
+		}
 	}
 	if *enableAuth {
 		if err := analyzers.ExportAuth(ctx, *authIgnoreCron); err != nil {

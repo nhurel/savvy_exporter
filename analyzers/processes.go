@@ -33,12 +33,12 @@ type ProcessInfo struct {
 var totalMemory int
 
 // ExportProcesses starts watching the processes to export their metrics
-func ExportProcesses(ctx context.Context, freq time.Duration) {
+func ExportProcesses(ctx context.Context, freq time.Duration) error {
 	logrus.Debugf("Exporting processes metrics every %s", freq)
 	var err error
 	totalMemory, err = parseMeminfo("/proc/meminfo")
 	if err != nil {
-		logrus.WithError(err).Fatalln("Could not read memory info")
+		return errors.Wrap(err, "Could not read memory info")
 	}
 	logrus.WithField("totalMemory", totalMemory).Debugln("Print total memory")
 
@@ -98,6 +98,7 @@ func ExportProcesses(ctx context.Context, freq time.Duration) {
 			}
 		}
 	}()
+	return nil
 }
 
 func scanProcesses(processPath string) (<-chan *ProcessInfo, error) {
