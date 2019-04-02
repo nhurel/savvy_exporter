@@ -30,17 +30,56 @@ type ProcessInfo struct {
 	vmsize, resident, shared, percent            int    // memory
 }
 
-var totalMemory int
+type ProcessesExporter struct {
+	sync.RWMutex
+	PageSize        int    //os page size
+	TotalMemory     int    //os total memory
+	ProcessPath     string //path to process dir (default /proc)
+	Export          func(<-chan *ProcessInfo)
+	cmdlineByPID    map[string]string //cache of process cmdline
+	activeProcesses map[string]bool   //keep track of cache entries cmdlineByPID
+}
+
+// ExportProcesses starts watching the processes to export their metrics
+func (pe *ProcessesExporter) ExportProcesses(ctx context.Context, freq time.Duration) {
+
+	if pe.cmdlineByPID == nil {
+		pe.cmdlineByPID = make(map[string]string)
+	}
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.Tick(freq):
+				pe.cleanState()
+				processes, err := pe.scanProcesses()
+				if err != nil {
+					logrus.WithError(err).Errorln("Could not scan processes")
+				} else {
+					pe.Export(processes)
+				}
+			}
+		}
+	}()
+}
 
 // ExportProcesses starts watching the processes to export their metrics
 func ExportProcesses(ctx context.Context, freq time.Duration) error {
 	logrus.Debugf("Exporting processes metrics every %s", freq)
 	var err error
+	processExporter := &ProcessesExporter{
+		PageSize:    os.Getpagesize(),
+		ProcessPath: "/proc",
+	}
+
+	var totalMemory int
 	totalMemory, err = parseMeminfo("/proc/meminfo")
 	if err != nil {
 		return errors.Wrap(err, "Could not read memory info")
 	}
 	logrus.WithField("totalMemory", totalMemory).Debugln("Print total memory")
+	processExporter.TotalMemory = totalMemory
 
 	var metricLabels = []string{"pid", "cmdline", "cmd", "state"}
 
@@ -83,48 +122,76 @@ func ExportProcesses(ctx context.Context, freq time.Duration) error {
 		Help:      "Amount of time process has been scheduled in kernel mode",
 	}, metricLabels)
 
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.Tick(freq):
-				processes, err := scanProcesses("/proc")
-				if err != nil {
-					logrus.WithError(err).Errorln("Could not scan processes")
-				} else {
-					exposeMetrics(processes, vmsizeVector, residentVector, memPercentVector, sharedVector, utimeVector, stimeVector)
-				}
-			}
-		}
-	}()
+	processExporter.Export = func(processes <-chan *ProcessInfo) {
+		exposeMetrics(processes, vmsizeVector, residentVector, memPercentVector, sharedVector, utimeVector, stimeVector)
+	}
+
+	processExporter.ExportProcesses(ctx, freq)
 	return nil
 }
 
-func scanProcesses(processPath string) (<-chan *ProcessInfo, error) {
-	fis, err := ioutil.ReadDir(processPath)
+func (pe *ProcessesExporter) scanProcesses() (<-chan *ProcessInfo, error) {
+	fis, err := ioutil.ReadDir(pe.ProcessPath)
 	if err != nil {
-		return nil, errors.Wrap(err, "Could not open /proc")
+		return nil, errors.Wrap(err, fmt.Sprintf("Could not open %s", pe.ProcessPath))
 	}
 
 	processes := make(chan *ProcessInfo)
 
+	activeProcesses := make(map[string]bool)
+
 	go func() {
 		wg := sync.WaitGroup{}
-
 		for _, fi := range fis {
 			wg.Add(1)
+			activeProcesses[fi.Name()] = true
 			go func(fi os.FileInfo) {
 				defer wg.Done()
-				analyzeProcess(processPath, fi, processes)
+				pe.analyzeProcess(fi, processes)
 			}(fi)
 		}
-
 		wg.Wait()
 		close(processes)
+		pe.Lock()
+		defer pe.Unlock()
+		pe.activeProcesses = activeProcesses
 	}()
 
 	return processes, nil
+}
+
+// cleanState clears cmdlineByPID cache according to tracked active pid
+func (pe *ProcessesExporter) cleanState() {
+	pe.Lock()
+	defer pe.Unlock()
+
+	for p := range pe.cmdlineByPID {
+		if pe.activeProcesses == nil || !pe.activeProcesses[p] {
+			delete(pe.cmdlineByPID, p)
+		}
+	}
+	if pe.cmdlineByPID == nil {
+		pe.cmdlineByPID = make(map[string]string)
+	}
+}
+
+func (pe *ProcessesExporter) getCmdline(pid string) (string, error) {
+	pe.RLock()
+	if cmdline, found := pe.cmdlineByPID[pid]; found {
+		pe.RUnlock()
+		return cmdline, nil
+	}
+	pe.RUnlock()
+
+	cmdline, err := ioutil.ReadFile(filepath.Join(pe.ProcessPath, pid, "cmdline"))
+	if err != nil {
+		return "", errors.Wrap(err, "Could not read cmdline")
+	}
+	pe.Lock()
+	defer pe.Unlock()
+	pe.cmdlineByPID[pid] = string(cmdline)
+	return string(cmdline), nil
+
 }
 
 func exposeMetrics(processes <-chan *ProcessInfo, vmsizeVector, residentVector, memPercentVector, sharedVector, utimeVector, stimeVector *prometheus.GaugeVec) {
@@ -152,7 +219,7 @@ func exposeMetrics(processes <-chan *ProcessInfo, vmsizeVector, residentVector, 
 	}
 }
 
-func analyzeProcess(processPath string, process os.FileInfo, out chan<- *ProcessInfo) {
+func (pe *ProcessesExporter) analyzeProcess(process os.FileInfo, out chan<- *ProcessInfo) {
 
 	if !process.IsDir() {
 		return
@@ -169,19 +236,17 @@ func analyzeProcess(processPath string, process os.FileInfo, out chan<- *Process
 	pidLabel = processid
 
 	log := logrus.WithField("pid", pid)
-	proc := filepath.Join(processPath, process.Name())
+	proc := filepath.Join(pe.ProcessPath, process.Name())
 	f, err := os.Open(proc)
 	defer f.Close()
 	if err != nil {
 		log.WithError(err).Errorln("Could not inspect process")
 		return
 	}
-	cmdline, err := ioutil.ReadFile(filepath.Join(proc, "cmdline"))
+	cmdlineLabel, err = pe.getCmdline(processid)
 	if err != nil {
-		log.WithError(err).Warnf("Could not read cmdline")
-		cmdline = []byte{}
+		log.WithError(err).Warnln("Failed to get command line")
 	}
-	cmdlineLabel = string(cmdline)
 
 	//TODO /proc/pid/io to get read_bytes/writes_bytes. This requires to store previous value to be able to compute read/write per sec. This can only be read as root ?
 
@@ -210,7 +275,7 @@ func analyzeProcess(processPath string, process os.FileInfo, out chan<- *Process
 			return
 		}
 	}
-	percent := 100 * resident / totalMemory
+	percent := 100 * resident / pe.TotalMemory
 
 	out <- &ProcessInfo{
 		pidLabel:     pidLabel,
