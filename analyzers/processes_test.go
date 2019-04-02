@@ -8,15 +8,19 @@ import (
 )
 
 func TestScanProcesses(t *testing.T) {
-	pe := &ProcessesExporter{
+
+	ctx, done := context.WithCancel(context.Background())
+	nbProcesses := 0
+	mc := &MockProcessesConsumer{}
+	pa := &ProcessesAnalyzer{
 		PageSize:    4096,
 		TotalMemory: 16147176 * 1024,
 		ProcessPath: "./testdata/proc",
+		Consumer:    mc,
 	}
-	ctx, done := context.WithCancel(context.Background())
-	pe.Export = func(processes <-chan *ProcessInfo) {
+
+	mc.consume = func(processes <-chan *ProcessInfo) {
 		defer done()
-		nbProcesses := 0
 		for process := range processes {
 			nbProcesses++
 			if process.cmdLabel != "grafana-server" {
@@ -50,13 +54,22 @@ func TestScanProcesses(t *testing.T) {
 				t.Errorf("Expected stime to be '%d' but got '%d'", 634, process.stime)
 			}
 		}
-		if nbProcesses != 1 {
-			t.Errorf("Expected ScanProcesses to scan 1 process but %d were inspected", nbProcesses)
-		}
 	}
-	pe.ExportProcesses(ctx, time.Microsecond)
+
+	pa.ExportProcesses(ctx, time.Microsecond)
 	<-ctx.Done()
 
+	if nbProcesses != 1 {
+		t.Errorf("Expected ScanProcesses to scan 1 process but %d were inspected", nbProcesses)
+	}
+}
+
+type MockProcessesConsumer struct {
+	consume ConsumeProcessesFunc
+}
+
+func (mc *MockProcessesConsumer) Consume(processes <-chan *ProcessInfo) {
+	mc.consume(processes)
 }
 
 func TestParseMemInfo(t *testing.T) {

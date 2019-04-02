@@ -15,13 +15,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
-
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 )
-
-// PrometheusProcessesSubsystem is the metric subsytem prefix for processes
-const PrometheusProcessesSubsystem = "processes"
 
 //ProcessInfo descibes all info to expose about a process
 type ProcessInfo struct {
@@ -30,21 +24,29 @@ type ProcessInfo struct {
 	vmsize, resident, shared, percent            int    // memory
 }
 
-type ProcessesExporter struct {
+type ConsumeProcessesFunc func(<-chan *ProcessInfo)
+
+// ProcessInfoConsumer reads the ProcessInfo sent to a channel
+type ProcessInfoConsumer interface {
+	Consume(<-chan *ProcessInfo)
+}
+
+// ProcessesAnalyzer is the object responsible for getting all ProcessInfo from processes running on a system
+type ProcessesAnalyzer struct {
 	sync.RWMutex
 	PageSize        int    //os page size
 	TotalMemory     int    //os total memory
 	ProcessPath     string //path to process dir (default /proc)
-	Export          func(<-chan *ProcessInfo)
+	Consumer        ProcessInfoConsumer
 	cmdlineByPID    map[string]string //cache of process cmdline
 	activeProcesses map[string]bool   //keep track of cache entries cmdlineByPID
 }
 
 // ExportProcesses starts watching the processes to export their metrics
-func (pe *ProcessesExporter) ExportProcesses(ctx context.Context, freq time.Duration) {
+func (pa *ProcessesAnalyzer) ExportProcesses(ctx context.Context, freq time.Duration) {
 
-	if pe.cmdlineByPID == nil {
-		pe.cmdlineByPID = make(map[string]string)
+	if pa.cmdlineByPID == nil {
+		pa.cmdlineByPID = make(map[string]string)
 	}
 	go func() {
 		for {
@@ -52,12 +54,12 @@ func (pe *ProcessesExporter) ExportProcesses(ctx context.Context, freq time.Dura
 			case <-ctx.Done():
 				return
 			case <-time.Tick(freq):
-				pe.cleanState()
-				processes, err := pe.scanProcesses()
+				pa.cleanState()
+				processes, err := pa.scanProcesses()
 				if err != nil {
 					logrus.WithError(err).Errorln("Could not scan processes")
 				} else {
-					pe.Export(processes)
+					pa.Consumer.Consume(processes)
 				}
 			}
 		}
@@ -68,9 +70,10 @@ func (pe *ProcessesExporter) ExportProcesses(ctx context.Context, freq time.Dura
 func ExportProcesses(ctx context.Context, freq time.Duration) error {
 	logrus.Debugf("Exporting processes metrics every %s", freq)
 	var err error
-	processExporter := &ProcessesExporter{
+	processExporter := &ProcessesAnalyzer{
 		PageSize:    os.Getpagesize(),
 		ProcessPath: "/proc",
+		Consumer:    NewProcessesExporter(),
 	}
 
 	var totalMemory int
@@ -81,59 +84,14 @@ func ExportProcesses(ctx context.Context, freq time.Duration) error {
 	logrus.WithField("totalMemory", totalMemory).Debugln("Print total memory")
 	processExporter.TotalMemory = totalMemory
 
-	var metricLabels = []string{"pid", "cmdline", "cmd", "state"}
-
-	var vmsizeVector = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Namespace: PrometheusNamespace,
-		Subsystem: PrometheusProcessesSubsystem,
-		Name:      "vmsize",
-		Help:      "Total program size",
-	}, metricLabels)
-	var residentVector = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Namespace: PrometheusNamespace,
-		Subsystem: PrometheusProcessesSubsystem,
-		Name:      "resident",
-		Help:      "resident set size (VmRSS)",
-	}, metricLabels)
-	var memPercentVector = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Namespace: PrometheusNamespace,
-		Subsystem: PrometheusProcessesSubsystem,
-		Name:      "mem_percent_usage",
-		Help:      "Memory Percent usage",
-	}, metricLabels)
-	var sharedVector = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Namespace: PrometheusNamespace,
-		Subsystem: PrometheusProcessesSubsystem,
-		Name:      "shared",
-		Help:      "Shared memory",
-	}, metricLabels)
-
-	var utimeVector = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Namespace: PrometheusNamespace,
-		Subsystem: PrometheusProcessesSubsystem,
-		Name:      "utime",
-		Help:      "Amount of time process has been scheduled in user mode",
-	}, metricLabels)
-
-	var stimeVector = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Namespace: PrometheusNamespace,
-		Subsystem: PrometheusProcessesSubsystem,
-		Name:      "stime",
-		Help:      "Amount of time process has been scheduled in kernel mode",
-	}, metricLabels)
-
-	processExporter.Export = func(processes <-chan *ProcessInfo) {
-		exposeMetrics(processes, vmsizeVector, residentVector, memPercentVector, sharedVector, utimeVector, stimeVector)
-	}
-
 	processExporter.ExportProcesses(ctx, freq)
 	return nil
 }
 
-func (pe *ProcessesExporter) scanProcesses() (<-chan *ProcessInfo, error) {
-	fis, err := ioutil.ReadDir(pe.ProcessPath)
+func (pa *ProcessesAnalyzer) scanProcesses() (<-chan *ProcessInfo, error) {
+	fis, err := ioutil.ReadDir(pa.ProcessPath)
 	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintf("Could not open %s", pe.ProcessPath))
+		return nil, errors.Wrap(err, fmt.Sprintf("Could not open %s", pa.ProcessPath))
 	}
 
 	processes := make(chan *ProcessInfo)
@@ -147,79 +105,54 @@ func (pe *ProcessesExporter) scanProcesses() (<-chan *ProcessInfo, error) {
 			activeProcesses[fi.Name()] = true
 			go func(fi os.FileInfo) {
 				defer wg.Done()
-				pe.analyzeProcess(fi, processes)
+				pa.analyzeProcess(fi, processes)
 			}(fi)
 		}
 		wg.Wait()
 		close(processes)
-		pe.Lock()
-		defer pe.Unlock()
-		pe.activeProcesses = activeProcesses
+		pa.Lock()
+		defer pa.Unlock()
+		pa.activeProcesses = activeProcesses
 	}()
 
 	return processes, nil
 }
 
 // cleanState clears cmdlineByPID cache according to tracked active pid
-func (pe *ProcessesExporter) cleanState() {
-	pe.Lock()
-	defer pe.Unlock()
+func (pa *ProcessesAnalyzer) cleanState() {
+	pa.Lock()
+	defer pa.Unlock()
 
-	for p := range pe.cmdlineByPID {
-		if pe.activeProcesses == nil || !pe.activeProcesses[p] {
-			delete(pe.cmdlineByPID, p)
+	for p := range pa.cmdlineByPID {
+		if pa.activeProcesses == nil || !pa.activeProcesses[p] {
+			delete(pa.cmdlineByPID, p)
 		}
 	}
-	if pe.cmdlineByPID == nil {
-		pe.cmdlineByPID = make(map[string]string)
+	if pa.cmdlineByPID == nil {
+		pa.cmdlineByPID = make(map[string]string)
 	}
 }
 
-func (pe *ProcessesExporter) getCmdline(pid string) (string, error) {
-	pe.RLock()
-	if cmdline, found := pe.cmdlineByPID[pid]; found {
-		pe.RUnlock()
+func (pa *ProcessesAnalyzer) getCmdline(pid string) (string, error) {
+	pa.RLock()
+	if cmdline, found := pa.cmdlineByPID[pid]; found {
+		pa.RUnlock()
 		return cmdline, nil
 	}
-	pe.RUnlock()
+	pa.RUnlock()
 
-	cmdline, err := ioutil.ReadFile(filepath.Join(pe.ProcessPath, pid, "cmdline"))
+	cmdline, err := ioutil.ReadFile(filepath.Join(pa.ProcessPath, pid, "cmdline"))
 	if err != nil {
 		return "", errors.Wrap(err, "Could not read cmdline")
 	}
-	pe.Lock()
-	defer pe.Unlock()
-	pe.cmdlineByPID[pid] = string(cmdline)
+	pa.Lock()
+	defer pa.Unlock()
+	pa.cmdlineByPID[pid] = string(cmdline)
 	return string(cmdline), nil
 
 }
 
-func exposeMetrics(processes <-chan *ProcessInfo, vmsizeVector, residentVector, memPercentVector, sharedVector, utimeVector, stimeVector *prometheus.GaugeVec) {
-	for process := range processes {
-		labelValues := []string{process.pidLabel, process.cmdlineLabel, process.cmdLabel, process.stateLabel}
-		log := logrus.WithField("pid", process.pidLabel)
-		if err := setGaugeValue(vmsizeVector, labelValues, process.vmsize); err != nil {
-			log.WithField("gauge", "vmsize").WithError(err).WithField("labels", labelValues).Errorln("Could not report value")
-		}
-		if err := setGaugeValue(residentVector, labelValues, process.resident); err != nil {
-			log.WithField("gauge", "resident").WithError(err).WithField("labels", labelValues).Errorln("Could not report value")
-		}
-		if err := setGaugeValue(sharedVector, labelValues, process.shared); err != nil {
-			log.WithField("gauge", "shared").WithError(err).WithField("labels", labelValues).Errorln("Could not report value")
-		}
-		if err := setGaugeValue(memPercentVector, labelValues, process.percent); err != nil {
-			log.WithField("gauge", "mem_percent_usage").WithError(err).WithField("labels", labelValues).Errorln("Could not report value")
-		}
-		if err := setGaugeValue(utimeVector, labelValues, process.utime); err != nil {
-			log.WithField("gauge", "utime").WithError(err).WithField("labels", labelValues).Errorln("Could not report value")
-		}
-		if err := setGaugeValue(stimeVector, labelValues, process.stime); err != nil {
-			log.WithField("gauge", "stime").WithError(err).WithField("labels", labelValues).Errorln("Could not report value")
-		}
-	}
-}
-
-func (pe *ProcessesExporter) analyzeProcess(process os.FileInfo, out chan<- *ProcessInfo) {
+func (pa *ProcessesAnalyzer) analyzeProcess(process os.FileInfo, out chan<- *ProcessInfo) {
 
 	if !process.IsDir() {
 		return
@@ -236,14 +169,14 @@ func (pe *ProcessesExporter) analyzeProcess(process os.FileInfo, out chan<- *Pro
 	pidLabel = processid
 
 	log := logrus.WithField("pid", pid)
-	proc := filepath.Join(pe.ProcessPath, process.Name())
+	proc := filepath.Join(pa.ProcessPath, process.Name())
 	f, err := os.Open(proc)
 	defer f.Close()
 	if err != nil {
 		log.WithError(err).Errorln("Could not inspect process")
 		return
 	}
-	cmdlineLabel, err = pe.getCmdline(processid)
+	cmdlineLabel, err = pa.getCmdline(processid)
 	if err != nil {
 		log.WithError(err).Warnln("Failed to get command line")
 	}
@@ -275,7 +208,7 @@ func (pe *ProcessesExporter) analyzeProcess(process os.FileInfo, out chan<- *Pro
 			return
 		}
 	}
-	percent := 100 * resident / pe.TotalMemory
+	percent := 100 * resident / pa.TotalMemory
 
 	out <- &ProcessInfo{
 		pidLabel:     pidLabel,
