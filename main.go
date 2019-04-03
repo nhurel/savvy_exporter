@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -13,7 +15,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+var Version string
+
 func main() {
+	// Display version if asked
+	version()
 
 	var enableProcess = flag.Bool("process-enable", true, "Enable processes metrics")
 	var enableAuth = flag.Bool("auth-enable", true, "Enable auth logs metrics")
@@ -60,4 +66,11 @@ func main() {
 
 	// TODO version
 	//TODO : fail2ban metrics
+}
+
+func version() {
+	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "-v" || os.Args[1] == "version") {
+		fmt.Printf("savvy_exporter v%s\n", Version)
+		os.Exit(0)
+	}
 }
