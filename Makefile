@@ -5,7 +5,7 @@ SOURCES := $(shell find . -name '*.go')
 
 git_tag = $(shell git describe --tags --long | sed -e 's/-/./g' | awk -F '.' '{print $$1"."$$2"."$$3+$$4}')
 
-default: $(BINARY)
+default: build
 
 all: clean fmt lint vet test build
 
