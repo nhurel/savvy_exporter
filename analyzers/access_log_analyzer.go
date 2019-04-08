@@ -11,17 +11,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
-
 	"github.com/hpcloud/tail"
 
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
-
-// PrometheusAccessLogSubsystem is the metric subsytem prefix for access_log analysis
-const PrometheusAccessLogSubsystem = "access"
 
 type AccessLogInfo struct {
 	vhost           string //virtual host who logged the access
@@ -30,19 +24,14 @@ type AccessLogInfo struct {
 }
 
 // ExportAccessLogs exposes metrics from apache access logs
-func ExportAccessLogs(ctx context.Context, logDir string) error {
+func ExportAccessLogs(ctx context.Context, logDir string, withCountry bool) error {
 
 	fis, err := ioutil.ReadDir(logDir)
 	if err != nil {
 		return errors.Wrap(err, fmt.Sprintf("Failed to open dir %s ", logDir))
 	}
 
-	labels := []string{"vhost", "ip", "method", "uri", "status"}
-	accessLogCounter := promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: PrometheusNamespace,
-		Subsystem: PrometheusAccessLogSubsystem,
-		Name:      "log",
-	}, labels)
+	exporter := NewAccessLogExporter(withCountry)
 
 	logs := make(chan *AccessLogInfo)
 
@@ -69,7 +58,7 @@ func ExportAccessLogs(ctx context.Context, logDir string) error {
 
 	go func() {
 		for log := range logs {
-			if err := incrementCounterValue(accessLogCounter, []string{log.vhost, log.ip, log.method, log.uri, strconv.Itoa(log.status)}, 1); err != nil {
+			if err := exporter.Export(log); err != nil {
 				logrus.WithField("accessLogLine", log).WithError(err).Errorln("Failed to count line")
 			}
 		}
