@@ -28,7 +28,7 @@ func main() {
 	var authIgnoreCron = flag.Bool("auth-ignore-cron", false, "Skip cron metrics")
 	var authIPLoc = flag.Bool("auth-iploc", true, "Enrich metrics with country code associated to ip addresses")
 	var accessLogDir = flag.String("access-log-dir", "/var/log/apache2", "Log dir where access logs are stored")
-	var accessLogIpLoc = flag.Bool("access-log-iploc", true, "Enrich metrics with country code associated to ip addresses")
+	var accessLogIPLoc = flag.Bool("access-log-iploc", true, "Enrich metrics with country code associated to ip addresses")
 	var logLevel = flag.String("log", "info", "log level : debug, info, warn, error")
 	flag.Parse()
 	switch *logLevel {
@@ -58,7 +58,7 @@ func main() {
 	}
 
 	if *enableAccessLog {
-		if err := analyzers.ExportAccessLogs(ctx, *accessLogDir, *accessLogIpLoc); err != nil {
+		if err := analyzers.ExportAccessLogs(ctx, *accessLogDir, *accessLogIPLoc); err != nil {
 			log.Fatalln(err)
 		}
 	}
