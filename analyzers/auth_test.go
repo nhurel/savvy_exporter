@@ -26,12 +26,12 @@ func TestParseAuthLine(t *testing.T) {
 		},
 		{
 			line:     "Mar 21 22:47:37 servername sshd[29367]: Invalid user shop1 from 139.59.82.59",
-			expected: &AuthInfo{success: false, username: "shop1", authType: "ssh"},
+			expected: &AuthInfo{success: false, username: "shop1", authType: "ssh", ip: "139.59.82.59"},
 		},
 		{
 			line:       "Mar 21 20:26:03 servername sshd[7033]: Accepted publickey for alice from 10.0.0.1 port 51568 ssh2: RSA ...",
 			ignoreCron: false,
-			expected:   &AuthInfo{success: true, username: "alice", authType: "ssh"},
+			expected:   &AuthInfo{success: true, username: "alice", authType: "ssh", ip: "10.0.0.1"},
 		},
 		{
 			line:       "Mar 21 22:19:18 servername sudo: pam_unix(sudo:session): session opened for user root by alice(uid=0)",
@@ -70,6 +70,9 @@ func compareAuthInfo(t *testing.T, expected, got *AuthInfo) {
 		}
 		if expected.authType != got.authType {
 			t.Errorf("Expected authInfo.authType to be %s but got %s", expected.authType, got.authType)
+		}
+		if expected.ip != got.ip {
+			t.Errorf("Expected authInfo.ip to be %s but got %s", expected.ip, got.ip)
 		}
 	}
 }
