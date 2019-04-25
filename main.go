@@ -11,6 +11,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	_ "net/http/pprof"
+
 	"github.com/nhurel/savvy_exporter/analyzers"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
