@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -27,6 +28,7 @@ func main() {
 	var enableAuth = flag.Bool("auth-enable", true, "Enable auth logs metrics")
 	var enableAccessLog = flag.Bool("access-log-enable", true, "Enable access logs metrics")
 	var processScanInterval = flag.Duration("process-frequency", 5*time.Second, "Processes scan interval")
+	var processIgnoreStates = flag.String("process-ignore-states", "", "Process in this state will be ignored")
 	var authIgnoreCron = flag.Bool("auth-ignore-cron", false, "Skip cron metrics")
 	var authIPLoc = flag.Bool("auth-iploc", true, "Enrich metrics with country code associated to ip addresses")
 	var accessLogDir = flag.String("access-log-dir", "/var/log/apache2", "Log dir where access logs are stored")
@@ -49,7 +51,8 @@ func main() {
 	ctx := context.Background()
 
 	if *enableProcess {
-		if err := analyzers.ExportProcesses(ctx, *processScanInterval); err != nil {
+
+		if err := analyzers.ExportProcesses(ctx, *processScanInterval, splitStringParam(*processIgnoreStates)); err != nil {
 			log.Fatalln(err)
 		}
 	}
@@ -68,8 +71,19 @@ func main() {
 	http.Handle("/metrics", promhttp.Handler())
 	log.Fatal(http.ListenAndServe(":19098", nil))
 
-	// TODO version
 	//TODO : fail2ban metrics
+}
+
+func splitStringParam(param string) map[string]bool {
+	splitted := strings.Split(param, ",")
+	result := make(map[string]bool)
+	for _, s := range splitted {
+		trimmed := strings.TrimSpace(s)
+		if trimmed != "" {
+			result[trimmed] = true
+		}
+	}
+	return result
 }
 
 func version() {

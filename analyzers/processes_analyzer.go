@@ -34,9 +34,10 @@ type ProcessInfoConsumer interface {
 // ProcessesAnalyzer is the object responsible for getting all ProcessInfo from processes running on a system
 type ProcessesAnalyzer struct {
 	sync.RWMutex
-	PageSize        int    //os page size
-	TotalMemory     int    //os total memory
-	ProcessPath     string //path to process dir (default /proc)
+	PageSize        int             //os page size
+	TotalMemory     int             //os total memory
+	ProcessPath     string          //path to process dir (default /proc)
+	IgnoreStates    map[string]bool //process states to ignore
 	Consumer        ProcessInfoConsumer
 	cmdlineByPID    map[string]string //cache of process cmdline
 	activeProcesses map[string]bool   //keep track of cache entries cmdlineByPID
@@ -67,13 +68,14 @@ func (pa *ProcessesAnalyzer) ExportProcesses(ctx context.Context, freq time.Dura
 }
 
 // ExportProcesses starts watching the processes to export their metrics
-func ExportProcesses(ctx context.Context, freq time.Duration) error {
+func ExportProcesses(ctx context.Context, freq time.Duration, ignoreStates map[string]bool) error {
 	logrus.Debugf("Exporting processes metrics every %s", freq)
 	var err error
-	processExporter := &ProcessesAnalyzer{
-		PageSize:    os.Getpagesize(),
-		ProcessPath: "/proc",
-		Consumer:    NewProcessesExporter(),
+	processAnalyzer := &ProcessesAnalyzer{
+		PageSize:     os.Getpagesize(),
+		ProcessPath:  "/proc",
+		IgnoreStates: ignoreStates,
+		Consumer:     NewProcessesExporter(),
 	}
 
 	var totalMemory int
@@ -82,9 +84,9 @@ func ExportProcesses(ctx context.Context, freq time.Duration) error {
 		return errors.Wrap(err, "Could not read memory info")
 	}
 	logrus.WithField("totalMemory", totalMemory).Debugln("Print total memory")
-	processExporter.TotalMemory = totalMemory
+	processAnalyzer.TotalMemory = totalMemory
 
-	processExporter.ExportProcesses(ctx, freq)
+	processAnalyzer.ExportProcesses(ctx, freq)
 	return nil
 }
 
@@ -194,6 +196,11 @@ func (pa *ProcessesAnalyzer) analyzeProcess(process os.FileInfo, out chan<- *Pro
 			log.WithError(err).Errorln("Stat file was not parsed correctly")
 			return
 		}
+	}
+
+	if pa.IgnoreStates[stateLabel] {
+		log.WithField("State", stateLabel).Debugln("Ignoring process")
+		return
 	}
 
 	statmBytes, err := ioutil.ReadFile(filepath.Join(proc, "statm"))

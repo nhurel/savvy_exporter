@@ -13,10 +13,11 @@ func TestScanProcesses(t *testing.T) {
 	nbProcesses := 0
 	mc := &MockProcessesConsumer{}
 	pa := &ProcessesAnalyzer{
-		PageSize:    4096,
-		TotalMemory: 16147176 * 1024,
-		ProcessPath: "./testdata/proc",
-		Consumer:    mc,
+		PageSize:     4096,
+		TotalMemory:  16147176 * 1024,
+		ProcessPath:  "./testdata/proc",
+		Consumer:     mc,
+		IgnoreStates: map[string]bool{"Zombie": true},
 	}
 
 	mc.consume = func(processes <-chan *ProcessInfo) {
