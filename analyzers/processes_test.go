@@ -18,6 +18,7 @@ func TestScanProcesses(t *testing.T) {
 		ProcessPath:  "./testdata/proc",
 		Consumer:     mc,
 		IgnoreStates: map[string]bool{"Zombie": true},
+		MinCPU:       100,
 	}
 
 	mc.consume = func(processes <-chan *ProcessInfo) {

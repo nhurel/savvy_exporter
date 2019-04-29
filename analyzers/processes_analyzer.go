@@ -38,6 +38,7 @@ type ProcessesAnalyzer struct {
 	TotalMemory     int             //os total memory
 	ProcessPath     string          //path to process dir (default /proc)
 	IgnoreStates    map[string]bool //process states to ignore
+	MinCPU          int             // min cpu usage to be exported
 	Consumer        ProcessInfoConsumer
 	cmdlineByPID    map[string]string //cache of process cmdline
 	activeProcesses map[string]bool   //keep track of cache entries cmdlineByPID
@@ -68,13 +69,14 @@ func (pa *ProcessesAnalyzer) ExportProcesses(ctx context.Context, freq time.Dura
 }
 
 // ExportProcesses starts watching the processes to export their metrics
-func ExportProcesses(ctx context.Context, freq time.Duration, ignoreStates map[string]bool) error {
+func ExportProcesses(ctx context.Context, freq time.Duration, ignoreStates map[string]bool, minCPU int) error {
 	logrus.Debugf("Exporting processes metrics every %s", freq)
 	var err error
 	processAnalyzer := &ProcessesAnalyzer{
 		PageSize:     os.Getpagesize(),
 		ProcessPath:  "/proc",
 		IgnoreStates: ignoreStates,
+		MinCPU:       minCPU,
 		Consumer:     NewProcessesExporter(),
 	}
 
@@ -181,6 +183,7 @@ func (pa *ProcessesAnalyzer) analyzeProcess(process os.FileInfo, out chan<- *Pro
 	cmdlineLabel, err = pa.getCmdline(processid)
 	if err != nil {
 		log.WithError(err).Warnln("Failed to get command line")
+		return
 	}
 
 	//TODO /proc/pid/io to get read_bytes/writes_bytes. This requires to store previous value to be able to compute read/write per sec. This can only be read as root ?
@@ -194,6 +197,10 @@ func (pa *ProcessesAnalyzer) analyzeProcess(process os.FileInfo, out chan<- *Pro
 		cmdLabel, stateLabel, utime, stime, err = parseStatContent(string(statBytes))
 		if err != nil {
 			log.WithError(err).Errorln("Stat file was not parsed correctly")
+			return
+		}
+		if utime+stime < pa.MinCPU {
+			log.WithField("cpu", utime+stime).Debugln("Ignoring process")
 			return
 		}
 	}

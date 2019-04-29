@@ -29,6 +29,7 @@ func main() {
 	var enableAccessLog = flag.Bool("access-log-enable", true, "Enable access logs metrics")
 	var processScanInterval = flag.Duration("process-frequency", 5*time.Second, "Processes scan interval")
 	var processIgnoreStates = flag.String("process-ignore-states", "", "Process in this state will be ignored")
+	var processMinCPU = flag.Int("process-min-cpu", 0, "Min cpu time for processes to be exported")
 	var authIgnoreCron = flag.Bool("auth-ignore-cron", false, "Skip cron metrics")
 	var authIPLoc = flag.Bool("auth-iploc", true, "Enrich metrics with country code associated to ip addresses")
 	var accessLogDir = flag.String("access-log-dir", "/var/log/apache2", "Log dir where access logs are stored")
@@ -52,7 +53,7 @@ func main() {
 
 	if *enableProcess {
 
-		if err := analyzers.ExportProcesses(ctx, *processScanInterval, splitStringParam(*processIgnoreStates)); err != nil {
+		if err := analyzers.ExportProcesses(ctx, *processScanInterval, splitStringParam(*processIgnoreStates), *processMinCPU); err != nil {
 			log.Fatalln(err)
 		}
 	}
