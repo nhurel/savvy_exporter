@@ -18,7 +18,7 @@ type AccessLogExporter struct {
 }
 
 func NewAccessLogExporter(withCountry bool) *AccessLogExporter {
-	labels := []string{"vhost", "ip", "method", "uri", "status"}
+	labels := []string{"vhost", "method", "uri", "status"}
 	var wq *WhoisQuerier
 	if withCountry {
 		labels = append(labels, "country")
@@ -38,7 +38,7 @@ func NewAccessLogExporter(withCountry bool) *AccessLogExporter {
 }
 
 func (ale *AccessLogExporter) Export(log *AccessLogInfo) error {
-	values := []string{log.vhost, log.ip, log.method, log.uri, strconv.Itoa(log.status)}
+	values := []string{log.vhost, log.method, log.uri, strconv.Itoa(log.status)}
 
 	if ale.withCountry {
 		country, err := ale.wq.IPToCountryCode(log.ip)
