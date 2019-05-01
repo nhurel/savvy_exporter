@@ -25,7 +25,7 @@ func (pe *ProcessesExporter) Consume(processes <-chan *ProcessInfo) {
 
 // Export exposes a processInfo to prometheus
 func (pe *ProcessesExporter) Export(process *ProcessInfo) {
-	labelValues := []string{process.pidLabel, process.cmdlineLabel, process.cmdLabel, process.stateLabel}
+	labelValues := []string{process.pidLabel, process.cmdlineLabel, process.cmdLabel}
 	log := logrus.WithField("pid", process.pidLabel)
 	if err := setGaugeValue(pe.vmsizeVector, labelValues, process.vmsize); err != nil {
 		log.WithField("gauge", "vmsize").WithError(err).WithField("labels", labelValues).Errorln("Could not report value")
@@ -49,7 +49,7 @@ func (pe *ProcessesExporter) Export(process *ProcessInfo) {
 
 // NewProcessesExporter must be called only once as it creates and register named gauges to prometheus registry
 func NewProcessesExporter() *ProcessesExporter {
-	var metricLabels = []string{"pid", "cmdline", "cmd", "state"}
+	var metricLabels = []string{"pid", "cmdline", "cmd"}
 	return &ProcessesExporter{
 		vmsizeVector: promauto.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: PrometheusNamespace,
