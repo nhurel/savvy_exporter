@@ -51,11 +51,13 @@ func (pa *ProcessesAnalyzer) ExportProcesses(ctx context.Context, freq time.Dura
 		pa.cmdlineByPID = make(map[string]string)
 	}
 	go func() {
+		ticker := time.NewTicker(freq)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.Tick(freq):
+			case <-ticker.C:
 				pa.cleanState()
 				processes, err := pa.scanProcesses()
 				if err != nil {
